@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">MathGate</string>
+    <string name="accessibility_service_description">Allows MathGate to notice when a blocked app is opened so it can show a blocking screen until you have completed a Math Academy task today.</string>
+</resources>

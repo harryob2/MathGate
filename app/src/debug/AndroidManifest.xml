@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Debug builds only. Allows plain HTTP so the app can be pointed at a local fake of mathacademy.com
+  (see Prefs.setDebugBaseUrl and tools/fake_mathacademy.py) for testing and screenshots.
+  Release builds keep Android's default: HTTPS only.
+-->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:usesCleartextTraffic="true" />
+</manifest>
