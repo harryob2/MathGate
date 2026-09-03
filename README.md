@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <a href="https://mathgate.com"><strong>Website: mathgate.com</strong></a>
+  <a href="https://mathgate.co"><strong>Website: mathgate.co</strong></a>
 </p>
 
 ## Features
