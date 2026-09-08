@@ -9,141 +9,144 @@
 </p>
 
 <p align="center">
-  <a href="https://mathgate.co"><strong>Website: mathgate.co</strong></a>
+  <a href="https://mathgate.co"><strong>mathgate.co</strong></a>
+  ·
+  <a href="#android">Android</a>
+  ·
+  <a href="#ios">iOS</a>
+  ·
+  <a href="docs/math-academy-api.md">API notes</a>
 </p>
 
-## Features
+## What it does
 
 - **Any task counts** — a lesson, review, multistep or quiz all satisfy the gate
-- **Configurable app blocking** — pick which apps to lock from your full app list, social media pinned to the top
+- **You choose the apps** — lock whatever you actually lose time to
 - **Configurable daily reset** — defaults to 04:00, so a late night still counts as the same day
 - **Fails closed** — no connection, a bad sign-in or an unexpected response all keep your apps locked
-- **Quiet after the first pass** — once a task is found, the app makes no further network calls until the next reset
+- **Quiet after the first pass** — once a task is found, no further network calls until the next reset
 - **No server, no account** — MathGate talks to Math Academy directly from your phone, nothing else
-- **Credentials encrypted on device** — your password is sealed with an Android Keystore key that never leaves the phone
-- **No notification** — the blocker is an accessibility service, so there is no permanent status notification to live with
+- **Credentials stay on the device** — Android Keystore on one side, the Keychain on the other
 
-## How It Works
+## Layout
 
-1. An `AccessibilityService` watches for window changes, so a blocked app is caught within about 100 ms of opening
-2. The gate is answered from a cache, never from the network, because that check runs on the main thread
-3. When the cache is cold, a background thread signs in to mathacademy.com and reads `/api/previous-tasks`
-4. If any task has a `completed` timestamp at or after the current period start, the gate opens; the pass is stored and honoured until the next daily reset, even across a reboot
-5. Otherwise a full-screen blocker appears explaining exactly why, with buttons to re-check or open Math Academy
-6. The session cookie lasts 30 days and is refreshed automatically, so you sign in once
+```
+android/    Kotlin app. AccessibilityService blocker, plain Activities, no Compose.
+ios/        Swift app. Screen Time (FamilyControls) shielding, SwiftUI, three extensions.
+  MathGateKit/   The gate logic both iOS targets share. Pure Foundation, tests on macOS.
+docs/       Notes that belong to neither platform — chiefly the Math Academy API contract.
+tools/      Cross-platform dev scripts: API probe, fake server, icon generation.
+screenshots/
+```
 
-## Screenshots
+The two apps share no code. They deliberately share a **contract** — the same gate rule, the same
+period arithmetic, the same reading of Math Academy's API — written down once in
+[`docs/math-academy-api.md`](docs/math-academy-api.md). Changing how the gate decides means
+changing it in both places.
 
-<p align="center">
-  <img src="screenshots/mathgate_home.png" width="250" alt="Home screen showing gate status and setup" />
-  &nbsp;&nbsp;
-  <img src="screenshots/mathgate_select_apps.png" width="250" alt="App selection with popular apps pinned" />
-  &nbsp;&nbsp;
-  <img src="screenshots/mathgate_blocked.png" width="250" alt="Block screen shown when a locked app is opened" />
-</p>
+## How it works
 
-## Setup
+The rule is the same on both platforms: **if no task has been completed since the daily reset,
+the chosen apps stay shut.** How that is enforced is not, because the two operating systems offer
+very different tools.
 
-1. Install the APK and open MathGate
-2. **Accessibility service** — enable MathGate. If Android shows "Restricted setting", open App info, then the overflow menu, then *Allow restricted settings*
+| | Android | iOS |
+|---|---|---|
+| Blocking mechanism | `AccessibilityService` watches window changes and covers a blocked app in ~100 ms | Screen Time `ManagedSettingsStore` shields the apps at OS level |
+| Who draws the block screen | The app (`BlockingActivity`) | The OS, styled by a `ShieldConfiguration` extension |
+| Default state | Nothing; the service decides per app launch | Shielded; the shield is OS state that persists |
+| Closing the gate each day | Cached pass expires at the reset | `DeviceActivityMonitor` extension wakes at the reset and re-shields |
+| Re-checking after finishing a task | "Retry" on the block screen | "Check Math Academy" on the shield, handled by a `ShieldAction` extension |
+| Background checks | The service is always live | Opportunistic `BGAppRefreshTask` only — a bonus, never the guarantee |
+
+The iOS design is inverted on purpose. Android asks "may this app open?" on every window change,
+so a failure to answer has to be treated as "no". iOS has no equivalent hook, but its shield is
+declarative state that survives reboots and app termination, so the gate is closed by default and
+only a confirmed Math Academy pass opens it. Both fail closed; iOS gets there by construction.
+
+## Android
+
+Requires JDK 17+ and the Android SDK (build-tools 36). Minimum Android 8.0 (API 26).
+
+```bash
+cd android
+./gradlew testDebugUnitTest assembleDebug
+adb install -r app/build/outputs/apk/debug/app-debug.apk
+```
+
+Unit tests run on the JVM with no device or emulator: period arithmetic across a British Summer
+Time change, task parsing, cookie handling, re-login on an expired session, backoff after a wrong
+password, and the cache and single-flight behaviour of the coordinator.
+`MathAcademyClientTest` drives the real HTTP client against a loopback fake of mathacademy.com.
+
+End-to-end behaviour is checked on a throwaway emulator, without a Math Academy account:
+
+```bash
+android/tools/verify_on_emulator.sh
+```
+
+That asserts the three cases that matter: a blocked app is covered when nothing is done, it opens
+with no network call once the day's pass is cached, and it is blocked again when that pass
+belongs to a previous period.
+
+### Setup on the phone
+
+1. Install and open MathGate
+2. **Accessibility service** — enable MathGate. If Android says "Restricted setting", open App
+   info → ⋮ → *Allow restricted settings*
 3. **Battery** — set to unrestricted, so the system does not stop the service
 4. **Select blocked apps**
-5. **Math Academy account** — enter your username and password, then *Sign in & test*. It reports how many tasks and how much XP you have done since the reset, and clears the password field on success
+5. **Math Academy account** — enter your username and password, then *Sign in & test*
 6. Turn on **Blocking enabled**
 
-## Building
+## iOS
 
-Requires JDK 17+ and the Android SDK (build-tools 36).
-
-```bash
-export JAVA_HOME=/path/to/jdk17
-export ANDROID_HOME=~/Library/Android/sdk
-./gradlew assembleDebug
-```
-
-The APK is output to `app/build/outputs/apk/debug/app-debug.apk`.
-
-## Testing
-
-Unit tests run on the JVM with no device or emulator. They cover the period arithmetic across a
-British Summer Time change, the task parsing, the cookie handling, the re-login on an expired
-session, the backoff after a wrong password, and the cache and single-flight behaviour of the
-coordinator. `MathAcademyClientTest` drives the real HTTP client against a loopback fake of
-mathacademy.com.
+Requires Xcode 16+, [XcodeGen](https://github.com/yonaskolb/XcodeGen), and iOS 17+.
 
 ```bash
-./gradlew testDebugUnitTest
+cd ios
+swift test --package-path MathGateKit   # the gate logic, on macOS, no simulator
+xcodegen generate                       # after any project.yml change
+open MathGate.xcodeproj
 ```
 
-End-to-end behaviour is checked on a throwaway emulator, without needing a Math Academy account:
+**A real device and the Family Controls entitlement are required to actually block anything.**
+Screen Time authorisation is unavailable in the simulator, so the simulator can exercise the UI
+and the gate logic but never the shield itself. Apple grants
+`com.apple.developer.family-controls` on request; a fork will need its own team, bundle IDs and
+App Group.
 
-```bash
-tools/verify_on_emulator.sh
-```
+### Setup on the phone
 
-That script creates and boots an AVD if needed, then asserts the three cases that matter: a blocked
-app is covered when nothing is done, it opens with no network call once the day's pass is cached, and
-it is blocked again when that pass belongs to a previous period.
-
-If Math Academy ever changes its login or API, `tools/ma_probe.sh` exercises both endpoints with
-curl and prints status codes, cookie names and a task summary. It reads the password without echo
-and never prints it.
-
-## Installation
-
-```bash
-adb install -r app/build/outputs/apk/debug/app-debug.apk
-
-# Optional: keep the OS from stopping the service
-adb shell dumpsys deviceidle whitelist +com.mathgate
-
-adb shell am start -n com.mathgate/.MainActivity
-```
-
-The accessibility service must be enabled from within the app or from Android settings; it cannot be
-granted over adb in normal use.
-
-## Architecture
-
-| File | Purpose |
-|------|---------|
-| `MathGateAccessibilityService.kt` | Detects a blocked app coming to the foreground and launches the blocker |
-| `GateStatusCoordinator.kt` | Synchronous cache plus single-flight background refresh; persists the daily pass |
-| `MathAcademyClient.kt` | Form login, session cookies, `/api/previous-tasks`, automatic re-login on expiry |
-| `MathAcademyGateApi.kt` | Maps client results and failures onto a `GateStatus`, all of which fail closed |
-| `TaskSummariser.kt` | Counts tasks completed since the period start and sums awarded XP |
-| `MaDateFormat.kt` | Builds the JavaScript-style date cursor the API expects |
-| `SetCookieParser.kt` | Reads cookie values and expiry out of `Set-Cookie` headers |
-| `ResetTime.kt` | Period arithmetic for the configurable daily reset |
-| `SecretStore.kt` | AES-GCM encryption of the password with an Android Keystore key |
-| `Prefs.kt` | SharedPreferences storage for settings, cookies and the cached pass |
-| `MainActivity.kt` | Status, setup, account and reset-time screen |
-| `AppSelectionActivity.kt` | App picker with icons, social media pinned to the top |
-| `BlockingActivity.kt` | Full-screen blocker with the reason and a re-check button |
-
-## Permissions
-
-| Permission | Why |
-|------------|-----|
-| `BIND_ACCESSIBILITY_SERVICE` | Detect which app has come to the foreground so it can be blocked |
-| `INTERNET` | Sign in to mathacademy.com and read your completed tasks |
-| `REQUEST_IGNORE_BATTERY_OPTIMIZATIONS` | Ask to be exempted so the OS does not stop the service |
-
-MathGate requests no usage-access, overlay, notification or boot permission.
+1. Install and open MathGate
+2. **Screen Time access** — tap Allow and approve the system prompt
+3. **Blocked apps** — choose them in the system picker. MathGate never learns which apps you
+   picked: iOS hands it opaque tokens, by design
+4. **Math Academy account** — enter your username and password, then *Sign in & test*
+5. Turn on **Blocking enabled**
 
 ## Privacy
 
-MathGate has no backend. Your Math Academy username, password and session cookies are stored in the
-app's private storage, with the password encrypted using a key held in the Android Keystore. The only
-network destination is `www.mathacademy.com`. Nothing is sent anywhere else, there is no analytics,
-and uninstalling the app deletes everything it stored.
+MathGate has no backend and no analytics. Your Math Academy username, password and session
+cookies are stored in the app's private storage — encrypted with an Android Keystore key on
+Android, in the Keychain on iOS. The only network destination is `www.mathacademy.com`. Nothing
+is sent anywhere else, and uninstalling deletes everything it stored.
 
-## Requirements
+On iOS, the apps you choose are represented by opaque tokens issued by the system. MathGate
+cannot read which apps they are, and neither can anyone reading its stored data.
 
-- Android 8.0+ (API 26)
-- A [Math Academy](https://mathacademy.com) account
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). The short version: keep the two platforms' gate
+behaviour identical, never log or commit credentials, and add a test for anything that decides
+whether the gate opens.
+
+## Not affiliated with Math Academy
+
+MathGate is an independent project. It signs in as you and reads your own completed tasks, the
+same way your browser does. It is not endorsed by or connected to Math Academy in any way.
 
 ## License
 
-All Rights Reserved. MathGate is proprietary software. You may not copy, modify, or distribute this
-software without explicit permission from the author.
+[GNU General Public License v3.0](LICENSE). If you distribute a modified version, it has to be
+free software too.

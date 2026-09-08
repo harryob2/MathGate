@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate MathGate's launcher icon, website logo and favicon.
+"""Generate MathGate's Android launcher icon, iOS app icon, website logo and favicon.
 
 The mark is a white padlock on the app's purple, with a pi knocked out of the lock body so the
 background shows through. Run from anywhere:  python3 tools/make_icons.py
@@ -111,7 +111,7 @@ def save(img, path, size):
 
 
 def main():
-    res = REPO / "app/src/main/res"
+    res = REPO / "android/app/src/main/res"
     master_square = composed(S)
     master_circle = composed(S, circle=True)
     master_fg = foreground(S)
@@ -125,11 +125,51 @@ def main():
     for bucket, px in [("mdpi", 108), ("hdpi", 162), ("xhdpi", 216), ("xxhdpi", 324), ("xxxhdpi", 432)]:
         save(master_fg, res / f"drawable-{bucket}/ic_launcher_foreground_asset.png", px)
 
+    # iOS: one 1024 master, which Xcode downsamples for every slot. The shield extension shows
+    # the mark on its own dark background, so it gets the transparent foreground instead.
+    ios = REPO / "ios/Assets.xcassets"
+    save(master_square, ios / "AppIcon.appiconset/mathgate_1024.png", 1024)
+    save(master_fg, ios / "ShieldIcon.imageset/shield_icon.png", 512)
+    write_ios_catalog(ios)
+
     # Website and README assets.
     if WEBSITE.exists():
         save(master_square, WEBSITE / "logo.png", 512)
         save(master_square, WEBSITE / "favicon.png", 64)
     save(master_square, REPO / "screenshots/mathgate_logo.png", 512)
+
+
+def write_ios_catalog(ios):
+    """Asset-catalog metadata. Single-size app icons have been enough since Xcode 14."""
+    (ios / "Contents.json").write_text(
+        '{\n  "info" : { "author" : "xcode", "version" : 1 }\n}\n'
+    )
+    (ios / "AppIcon.appiconset/Contents.json").write_text(
+        """{
+  "images" : [
+    {
+      "filename" : "mathgate_1024.png",
+      "idiom" : "universal",
+      "platform" : "ios",
+      "size" : "1024x1024"
+    }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 }
+}
+"""
+    )
+    (ios / "ShieldIcon.imageset/Contents.json").write_text(
+        """{
+  "images" : [
+    { "filename" : "shield_icon.png", "idiom" : "universal", "scale" : "1x" },
+    { "idiom" : "universal", "scale" : "2x" },
+    { "idiom" : "universal", "scale" : "3x" }
+  ],
+  "info" : { "author" : "xcode", "version" : 1 },
+  "properties" : { "template-rendering-intent" : "original" }
+}
+"""
+    )
 
 
 if __name__ == "__main__":
